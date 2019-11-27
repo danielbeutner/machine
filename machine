@@ -1,0 +1,192 @@
+#!/bin/sh
+# Be prepared to turn your box into an awesome development machine.
+
+fancy_echo() {
+  local fmt="$1"; shift
+
+  printf "\\n$fmt\\n" "$@"
+}
+
+append_to_zshrc() {
+  local text="$1" zshrc
+  local skip_new_line="${2:-0}"
+
+  if [ -w "$HOME/.zshrc.local" ]; then
+    zshrc="$HOME/.zshrc.local"
+  else
+    zshrc="$HOME/.zshrc"
+  fi
+
+  if ! grep -Fqs "$text" "$zshrc"; then
+    if [ "$skip_new_line" -eq 1 ]; then
+      printf "%s\\n" "$text" >> "$zshrc"
+    else
+      printf "\\n%s\\n" "$text" >> "$zshrc"
+    fi
+  fi
+}
+
+trap 'ret=$?; test $ret -ne 0 && printf "failed\n\n" >&2; exit $ret' EXIT
+
+set -e
+
+if [ ! -d "$HOME/.bin/" ]; then
+  mkdir "$HOME/.bin"
+fi
+
+if [ ! -f "$HOME/.zshrc" ]; then
+  touch "$HOME/.zshrc"
+fi
+
+# Languages settings
+append_to_zshrc 'export LANG="en_US.UTF-8"'
+append_to_zshrc 'export LC_ALL="en_US.UTF-8"'
+append_to_zshrc 'export LC_CTYPE="en_US.UTF-8"'
+# bin paths
+append_to_zshrc 'export PATH="$HOME/.bin:$PATH"'
+append_to_zshrc 'export PATH="/usr/local/bin:/usr/local/sbin:$PATH"'
+
+HOMEBREW_PREFIX="/usr/local"
+
+if [ -d "$HOMEBREW_PREFIX" ]; then
+  if ! [ -r "$HOMEBREW_PREFIX" ]; then
+    sudo chown -R "$LOGNAME:admin" /usr/local
+  fi
+else
+  sudo mkdir "$HOMEBREW_PREFIX"
+  sudo chflags norestricted "$HOMEBREW_PREFIX"
+  sudo chown -R "$LOGNAME:admin" "$HOMEBREW_PREFIX"
+fi
+
+update_shell() {
+  local shell_path;
+  shell_path="$(command -v zsh)"
+
+  fancy_echo "Changing your shell to zsh ..."
+  if ! grep "$shell_path" /etc/shells > /dev/null 2>&1 ; then
+    fancy_echo "Adding '$shell_path' to /etc/shells"
+    sudo sh -c "echo $shell_path >> /etc/shells"
+  fi
+  sudo chsh -s "$shell_path" "$USER"
+}
+
+case "$SHELL" in
+  */zsh)
+    if [ "$(command -v zsh)" != '/usr/local/bin/zsh' ] ; then
+      update_shell
+    fi
+    ;;
+  *)
+    update_shell
+    ;;
+esac
+
+if ! command -v brew >/dev/null; then
+  fancy_echo "Installing Homebrew ..."
+    curl -fsS \
+      'https://raw.githubusercontent.com/Homebrew/install/master/install' | ruby
+
+    append_to_zshrc '# recommended by brew doctor'
+
+    append_to_zshrc 'export PATH="/usr/local/bin:$PATH"' 1
+
+    export PATH="/usr/local/bin:$PATH"
+fi
+
+fancy_echo "Updating Homebrew formulae ..."
+brew update --force # https://github.com/Homebrew/brew/issues/1151
+brew bundle --file=- <<EOF
+tap "homebrew/services"
+tap "homebrew/cask"
+tap "homebrew/cask-fonts"
+tap "universal-ctags/universal-ctags"
+
+# Unix
+brew "universal-ctags", args: ["HEAD"]
+brew "antigen"
+brew "git"
+brew "openssl"
+brew "openssh"
+brew "the_silver_searcher"
+brew "vim"
+brew "watchman"
+brew "zsh"
+
+# Programming language prerequisites and package managers
+brew "libyaml" # should come after openssl
+brew "coreutils"
+
+# GitHub
+brew "hub"
+
+# antigen
+brew "antigen"
+
+# Appstore
+brew "mas"
+
+# Some tools
+cask "docker"
+cask "gpg-suite"
+cask "xquartz"
+
+# Font with ligatures and for powerline
+cask "font-fira-code"
+
+# Programming languages
+brew "python"
+brew "n"
+
+# Applications
+cask "hyper"
+cask "alfred"
+cask "google-chrome"
+cask "firefox"
+cask "visual-studio-code"
+cask "spotify"
+cask "spectacle"
+cask "kap"
+EOF
+
+fancy_echo "Setting up progamming lanuguages..."
+
+# node
+append_to_zshrc 'export N_PREFIX="$HOME/.n"'
+append_to_zshrc 'export PATH="$N_PREFIX/bin:$PATH"'
+n latest
+
+# python
+append_to_zshrc 'export PATH="/usr/local/opt/python/libexec/bin:$PATH"'
+append_to_zshrc 'export PATH="$HOME/Library/Python/3.7/bin:$PATH"'
+pip install --user pipenv
+
+fancy_echo "Setting up zsh..."
+append_to_zshrc 'source /usr/local/share/antigen/antigen.zsh'
+append_to_zshrc '# Libs'
+append_to_zshrc 'antigen use oh-my-zsh'
+append_to_zshrc '# Plugins'
+append_to_zshrc 'antigen bundle git'
+append_to_zshrc 'antigen bundle zsh-users/zsh-syntax-highlighting'``
+append_to_zshrc 'antigen bundle ssh-agent'
+append_to_zshrc 'antigen bundle node'
+append_to_zshrc 'antigen bundle npm'
+append_to_zshrc 'antigen bundle npx'
+append_to_zshrc 'antigen bundle brew'
+append_to_zshrc 'antigen bundle brew-cask'
+append_to_zshrc 'antigen bundle python'
+append_to_zshrc 'antigen bundle osx'
+append_to_zshrc '# Theme'
+append_to_zshrc 'antigen theme caiogondim/bullet-train.zsh bullet-train'
+append_to_zshrc 'antigen apply'
+
+fancy_echo "Setting up hyper..."
+hyper i hyper-search hyper-night-owl
+
+# Settings for macos
+if [ -f "./machine.macos" ]; then
+  fancy_echo "Set macos settings from ~/machine.macos ..."
+  . "./machine.macos"
+fi
+
+fancy_echo "Cleaning up old Homebrew formulae ..."
+brew cleanup
